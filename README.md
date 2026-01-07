@@ -35,8 +35,7 @@ docker compose up --build
    - calcule les erreurs par classe,
    - calcule un score simple de drift,
    - déclenche un retrain si :
-     - assez de nouvelles données (MIN_NEW_LABELS), ET
-     - drift > DRIFT_THRESHOLD **ou** erreurs par classe ≥ FAIL_THRESHOLD.
+     - assez de nouvelles données (MIN_NEW_LABELS) **ou** erreurs par classe ≥ FAIL_THRESHOLD.
 
 ## Versionning des modèles
 
