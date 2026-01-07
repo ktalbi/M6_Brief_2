@@ -3,19 +3,24 @@ services:
     build: ./fastapi_app
     container_name: mnist_api
     environment:
+      DATA_DIR: /app/data
       MODEL_DIR: /app/models
-      MODEL_PATH: /app/models/mnist_cnn_model.h5
+      MODEL_PATH: /app/models/latest.keras
+
+      #  bootstrap/train de départ si pas de modèle local
       TRAIN_EPOCHS: "10"
       TRAIN_BATCH_SIZE: "128"
       TRAIN_VAL_SPLIT: "0.1"
-      DATA_DIR: /app/data
-      FEEDBACK_DB_PATH: /app/data/feedback.db
 
+      DATABASE_URL: sqlite:////app/data/predictions.db
+
+      # MLflow
       BOOTSTRAP_FROM_MLFLOW: "true"
       MLFLOW_TRACKING_URI: "http://mlflow:5000"
       MLFLOW_EXPERIMENT: "mnist-hitl"
       MLFLOW_METRIC: "val_accuracy"
-      MLFLOW_MODEL_ARTIFACT_PATH: "model/mnist_cnn_model.h5"
+      MLFLOW_MODEL_ARTIFACT_PATH: "model/latest.keras"
+
     depends_on:
       - mlflow
     healthcheck:
@@ -40,7 +45,6 @@ services:
       - "8501:8501"
     networks: [app_network]
 
-
   prefect-server:
     image: prefecthq/prefect:2-latest
     container_name: prefect-server
@@ -61,22 +65,27 @@ services:
     networks: [app_network]
 
   prefect:
-    build: ./prefect_flow
+    build:
+      context: .
+      dockerfile: prefect_flow/Dockerfile
     container_name: mnist_prefect
     environment:
-     
       PREFECT_API_URL: http://prefect-server:4200/api
 
+      # API (reload + mark)
       API_URL: http://api:8000
       MODEL_DIR: /app/models
-      LATEST_MODEL_PATH: /app/models/latest.keras
-      FEEDBACK_DB_PATH: /app/data/feedback.db
+      MODEL_PATH: /app/models/latest.keras
+      DATABASE_URL: sqlite:////app/data/predictions.db
+
+      # MLflow
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_EXPERIMENT: mnist-hitl
-      FAIL_THRESHOLD: 20
-      MIN_NEW_LABELS: 50
-      DRIFT_THRESHOLD: 0.15
-      SCHEDULE_INTERVAL_SECONDS: 3600
+
+      FAIL_THRESHOLD: "1"
+      MIN_NEW_LABELS: "1"
+      SCHEDULE_INTERVAL_SECONDS: "300"
+
     volumes:
       - shared_models:/app/models
       - shared_data:/app/data
@@ -85,7 +94,7 @@ services:
       - api
       - mlflow
     networks: [app_network]
-    restart: "no"
+    restart: unless-stopped
 
   mlflow:
     image: python:3.11-slim
