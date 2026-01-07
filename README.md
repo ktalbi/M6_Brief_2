@@ -1,47 +1,125 @@
-# MNIST Human-in-the-Loop (Streamlit + FastAPI + Prefect + Optuna + MLflow + Prometheus/Grafana)
+# M6_Brief_2 : MNIST Human-in-the-Loop – MLOps Pipeline
 
-Ce projet met en place une chaîne complète de **test en situation réelle** d'un modèle de classification MNIST avec **boucle de feedback humain** et **réentraînement périodique**.
+## Vue d’ensemble
 
-## Architecture
+Ce projet met en place une **pipeline MLOps complète** autour du dataset MNIST, intégrant :
 
-- **Streamlit** : interface de dessin (canvas) + correction utilisateur.
-- **FastAPI** : endpoint `/predict` (upload PNG 28×28) + `/correct` (correction) + stockage SQLite.
-- **SQLite** (volume Docker) : stocke les images (PNG) + labels prédits/corrigés.
-- **Prefect** : exécute toutes les heures une analyse des nouvelles données + déclenche un retrain si conditions.
-- **Optuna** : optimisation d'hyperparamètres (lr, dropout, batch size).
-- **MLflow** : tracking des runs (monitoring + retrain), versionnage des paramètres/métriques/artifacts.
-- **Prometheus + Grafana** : métriques API (latence, statut HTTP) + métriques custom (predictions/corrections).
+- une **API FastAPI** pour l’inférence et la collecte de feedback utilisateur,
+- une **application Streamlit** pour l’interface utilisateur,
+- un **flow Prefect** pour le monitoring et le ré-entrainement automatique du modèle,
+- **MLflow** pour le suivi des expériences et des modèles,
+- **Prometheus & Grafana** pour l’observabilité.
+
+Le cœur "intelligent" du système est le **processus de re-entrainement automatique** orchestré par `flow.py`, décrit en détail ci-dessous.
+
+---
+
+## Architecture (logique)
+
+```
+Utilisateur
+   ↓ (image)
+Streamlit → FastAPI → Modèle CNN
+                    ↓
+                Prédiction
+                    ↓
+        (optionnel) Correction humaine
+                    ↓
+               Base de données
+                    ↓
+               Prefect Flow
+                    ↓
+           Retrain + MLflow
+                    ↓
+             Reload API
+```
+
+---
+
+## Objectif du retrain
+
+Le re-entrainement vise à :
+
+- corriger les **erreurs récurrentes** du modèle,
+- intégrer les **retours humains** (Human-in-the-Loop),
+- améliorer progressivement les performances **sans oublier** les connaissances initiales.
+
+Le modèle **n’est jamais ré-entrainé uniquement sur les nouvelles données** : celles-ci sont utilisées comme **signal correctif**, ajoutées aux données MNIST historiques.
+
+---
+
+## Processus de retrain (flow.py)
+
+Le fichier `flow.py` définit un **flow Prefect planifié**, exécuté périodiquement (par défaut toutes les heures, pour le test, toutes les 300s, verifier docker-compose  : FAIL_THRESHOLD: "1", MIN_NEW_LABELS: "1",  SCHEDULE_INTERVAL_SECONDS: "300").
+
+### Chargement des feedbacks (`load_feedback`)
+
+- Lecture de la base SQLite (`predictions.db`)
+- Sélection des prédictions **corrigées par un humain**
+- Conversion des images PNG → format MNIST `(28×28×1)` via le **préprocessing partagé** (`app.ml.model`)
+
+---
+
+### Analyse des erreurs (`compute_failure_counts`)
+
+- Identification des prédictions incorrectes
+- Comptage des erreurs totales et par classe
+
+---
+
+### Décision de retrain (`should_retrain`)
+
+Le retrain est déclenché si :
+- un nombre minimum de nouveaux labels est atteint
+- au moins une classe dépasse un seuil d’erreurs
+
+---
+
+### Optimisation et entrainement
+
+- Préparation des données : MNIST + feedback
+- Optimisation Optuna
+- Entrainement final
+- Logging MLflow
+
+---
+
+### Déploiement
+
+- Sauvegarde du modèle versionné
+- Mise à jour de `latest.keras`
+- Reload à chaud de l’API
+
+---
 
 ## Lancer le projet
 
+### Fichier .env :
 ```bash
-docker compose up --build
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
+FASTAPI_PORT=8080
+STREAMLIT_PORT=8501
+PROMETHEUS_PORT=9090
+GRAFANA_PORT=3000
 ```
 
-- Streamlit : http://localhost:8501
-- API FastAPI : http://localhost:8000 (docs: `/docs`)
-- Prometheus : http://localhost:9090
-- Grafana : http://localhost:3000 (login admin/admin par défaut)
-- MLflow : http://localhost:5000
-- Prefect server : http://localhost:4200
 
-## Boucle de feedback
+```bash
+docker compose up -d --build
+```
+Accès :
 
-1. Dessiner un chiffre dans Streamlit.
-2. Cliquer **Prédire** → l'API renvoie `{prediction_id, predicted_label, probabilities}` et stocke l'image + prédiction.
-3. Si c'est faux, sélectionner le label correct et cliquer **Corriger & enregistrer**.
-4. Toutes les heures (service `prefect`), le flow :
-   - charge les corrections,
-   - calcule les erreurs par classe,
-   - calcule un score simple de drift,
-   - déclenche un retrain si :
-     - assez de nouvelles données (MIN_NEW_LABELS) **ou** erreurs par classe ≥ FAIL_THRESHOLD.
+API : http://localhost:8000/docs
 
-## Versionning des modèles
+Streamlit : http://localhost:8501
 
-- Les modèles sont écrits dans le volume `shared_models` :
-  - `/app/models/model_<timestamp>.keras`
-  - `/app/models/latest.keras` (copie du dernier modèle déployé)
-- FastAPI recharge le modèle via `/reload`.
+MLflow : http://localhost:5000
+
+Prefect UI : http://localhost:4200
+
+Grafana : http://localhost:3000
+
+---
 
 
