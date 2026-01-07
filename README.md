@@ -23,6 +23,7 @@ docker compose up --build
 - Prometheus : http://localhost:9090
 - Grafana : http://localhost:3000 (login admin/admin par défaut)
 - MLflow : http://localhost:5000
+- Prefect server : http://localhost:4200
 
 ## Boucle de feedback
 
@@ -44,8 +45,4 @@ docker compose up --build
   - `/app/models/latest.keras` (copie du dernier modèle déployé)
 - FastAPI recharge le modèle via `/reload`.
 
-## Notes importantes
 
-- Le drift ici est un **heuristique** (distance sur la distribution de l'intensité moyenne).  
-  En production, vous remplacerez cela par Evidently/Alibi-Detect/KS tests multi-features, embeddings, etc.
-- Pour accélérer, l'Optuna objective n'entraîne qu'**1 epoch** par trial.
