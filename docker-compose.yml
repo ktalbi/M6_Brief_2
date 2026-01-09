@@ -84,7 +84,7 @@ services:
 
       FAIL_THRESHOLD: "1"
       MIN_NEW_LABELS: "1"
-      SCHEDULE_INTERVAL_SECONDS: "300"
+      SCHEDULE_INTERVAL_SECONDS: "900"
 
     volumes:
       - shared_models:/app/models

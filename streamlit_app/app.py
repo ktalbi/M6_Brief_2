@@ -34,11 +34,8 @@ def canvas_to_png_bytes() -> bytes:
     if canvas_result.image_data is None:
         raise ValueError("No image")
     img = Image.fromarray(canvas_result.image_data.astype("uint8"), "RGBA")
-    img = img.convert("L").resize((28, 28))
+    img = img.convert("L")
     arr = np.array(img, dtype=np.uint8)
-    # Invert if background too bright (safety)
-    if arr.mean() > 127:
-        arr = 255 - arr
     img = Image.fromarray(arr, mode="L")
     buf = io.BytesIO()
     img.save(buf, format="PNG")

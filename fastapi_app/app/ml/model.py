@@ -68,22 +68,96 @@ def build_cnn_model(
 
 def read_as_mnist_28x28_uint8(file_bytes: bytes) -> np.ndarray:
     """
-    Decode bytes -> (28,28) uint8.
-    Heuristic: invert if background is white (typical canvas).
+    Convertit des bytes d'image en tableau uint8 (28x28) au format "MNIST-like" :
+    - Conversion en niveaux de gris
+    - Inversion si le fond est clair (chiffre clair sur fond sombre)
+    - Découpage serré autour du chiffre
+    - Mise à l'échelle dans une boîte 20x20 (comme MNIST)
+    - Padding vers 28x28
+    - Recentrage via le centre de masse
     """
+    # --- Décodage de l'image ---
     try:
         img = Image.open(io.BytesIO(file_bytes)).convert("L")
     except Exception:
-        raise ValueError("Invalid image bytes")
+        raise ValueError("Impossible de décoder l'image")
 
-    img = img.resize((28, 28))
     arr = np.array(img, dtype=np.uint8)
 
-    # si l’image est “inversée” (fond blanc), elle l’inverse pour respecter la convention MNIST (chiffre blanc sur fond noir)
+    # --- Inversion si nécessaire (convention MNIST : chiffre clair sur fond sombre) ---
     if arr.mean() > 127:
         arr = 255 - arr
 
-    return arr
+    # --- Détection des pixels appartenant au chiffre ---
+    # Seuil faible pour ignorer le bruit très léger
+    seuil = 30
+    masque = arr > seuil
+
+    if not np.any(masque):
+        # Aucun trait détecté → image vide
+        return np.zeros((28, 28), dtype=np.uint8)
+
+    # --- Bounding box du chiffre ---
+    ys, xs = np.where(masque)
+    y_min, y_max = ys.min(), ys.max() + 1
+    x_min, x_max = xs.min(), xs.max() + 1
+
+    # --- Découpage serré ---
+    decoupe = arr[y_min:y_max, x_min:x_max]
+
+    # --- Mise au carré par padding (pour éviter la distorsion à la mise à l'échelle) ---
+    h, w = decoupe.shape
+    taille = max(h, w)
+
+    carre = np.zeros((taille, taille), dtype=np.uint8)
+    y_offset = (taille - h) // 2
+    x_offset = (taille - w) // 2
+    carre[y_offset:y_offset + h, x_offset:x_offset + w] = decoupe
+
+    # --- Redimensionnement vers 20x20 (taille typique MNIST) ---
+    img_carre = Image.fromarray(carre, mode="L")
+    if taille != 20:
+        img_carre = img_carre.resize((20, 20), resample=Image.BILINEAR)
+
+    chiffre_20 = np.array(img_carre, dtype=np.uint8)
+
+    # --- Padding final vers 28x28 ---
+    out28 = np.zeros((28, 28), dtype=np.uint8)
+    out28[4:24, 4:24] = chiffre_20
+
+    # --- Recentrage par centre de masse (pondéré par l'intensité) ---
+    m = out28.astype(np.float32)
+    somme = float(m.sum())
+
+    if somme > 0:
+        ys, xs = np.indices((28, 28))
+        centre_y = float((ys * m).sum() / somme)
+        centre_x = float((xs * m).sum() / somme)
+
+        # Centre cible ≈ centre MNIST
+        cible = 13.5
+        dy = int(round(cible - centre_y))
+        dx = int(round(cible - centre_x))
+
+        if dx != 0 or dy != 0:
+            recentre = np.zeros_like(out28)
+
+            # Calcul des plages source/destination en évitant les débordements
+            y_src0 = max(0, -dy)
+            y_src1 = min(28, 28 - dy)
+            x_src0 = max(0, -dx)
+            x_src1 = min(28, 28 - dx)
+
+            y_dst0 = max(0, dy)
+            y_dst1 = min(28, 28 + dy)
+            x_dst0 = max(0, dx)
+            x_dst1 = min(28, 28 + dx)
+
+            recentre[y_dst0:y_dst1, x_dst0:x_dst1] = out28[y_src0:y_src1, x_src0:x_src1]
+            out28 = recentre
+
+    return out28
+
 
 
 def preprocess_image_uint8(arr28: np.ndarray) -> np.ndarray:
@@ -207,6 +281,10 @@ def train_and_save_and_log(model_path: str = MODEL_PATH) -> None:
             mlflow.log_metric("val_accuracy", float(history.history["val_accuracy"][-1]))
         if "val_loss" in history.history:
             mlflow.log_metric("val_loss", float(history.history["val_loss"][-1]))
+        if "accuracy" in history.history:
+            mlflow.log_metric("train_accuracy", float(history.history["accuracy"][-1]))
+        if "loss" in history.history:
+            mlflow.log_metric("train_loss", float(history.history["loss"][-1]))
 
         test_loss, test_acc = model.evaluate(x_test, y_test, verbose=0)
         mlflow.log_metric("test_accuracy", float(test_acc))
